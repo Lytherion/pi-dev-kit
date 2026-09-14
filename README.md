@@ -9,7 +9,7 @@ A permission management extension for Pi Coding Agent, providing operation admis
 
 ### Key Features
 
-- **Three Operation Modes**:
+- **Three Operation Modes** (starts in `Auto` when the session has no saved selection):
   - `Default`: All sensitive operations (file writes, Bash execution) require manual user confirmation.
   - `Auto`: File writes within the current project directory and `/tmp` are allowed automatically. Bash commands run in a `bwrap` sandbox (restricted write access). Mutating Git commands or permission escalations still require confirmation.
   - `YOLO` (Unrestricted): Fully unrestricted. No sandboxing, no confirmation prompts. Like Pi with no security policy.
@@ -49,8 +49,8 @@ In `Auto` mode, if the LLM needs to perform actions outside the sandbox, it will
 
 ### 核心特性
 
-- **三种工作模式**：
-  - `Default` (默认)：所有敏感操作（写文件、执行 Bash）都需要用户手动确认。
+- **三种工作模式**（会话没有已保存选项时默认使用 `Auto`）：
+  - `Default` (确认)：所有敏感操作（写文件、执行 Bash）都需要用户手动确认。
   - `Auto` (自动)：在当前项目目录和 `/tmp` 下的写操作自动允许；Bash 命令在 `bwrap` 沙箱中执行（限制写权限）；修改 Git 或越权操作需确认。
   - `YOLO` (不限)：完全放开限制。不再使用沙箱，不再弹出任何确认框。
 - **安全沙箱**：基于 `bubblewrap` (bwrap) 实现的 Bash 执行隔离，防止意外修改系统关键路径。

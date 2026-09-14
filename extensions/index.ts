@@ -133,7 +133,7 @@ async function approve(
 }
 
 export default function simplePermissions(pi: ExtensionAPI): void {
-  let mode: PermissionMode = "default";
+  let mode: PermissionMode = "auto";
 
   function updateStatus(ctx: ExtensionContext): void {
     let color: "accent" | "muted" | "warning" = "muted";
@@ -192,7 +192,9 @@ export default function simplePermissions(pi: ExtensionAPI): void {
       .filter((item) => item.type === "custom" && item.customType === "simple-permissions")
       .pop() as { data?: PermissionState } | undefined;
     const savedMode = entry?.data?.mode;
-    mode = (savedMode === "auto" || savedMode === "yolo") ? savedMode : "default";
+    mode = (savedMode === "default" || savedMode === "auto" || savedMode === "yolo")
+      ? savedMode
+      : "auto";
     updateStatus(ctx);
   });
 
