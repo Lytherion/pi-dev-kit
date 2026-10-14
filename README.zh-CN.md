@@ -1,0 +1,149 @@
+# Pi Dev Kit
+
+[English](README.md) | **简体中文**
+
+**让 Pi Coding Agent 从理解项目、澄清需求到规划和实施，形成可审阅、可接续的开发流程。**
+
+Pi Dev Kit 将项目导航、持久化计划、交互式问答和权限控制组合在一起：先按需理解源码，再把改动方案写成 Plan，审阅后授权执行。日常命令可自动运行，需要更大权限时再确认，而不是每一步都打断你。
+
+## 特色功能
+
+| 功能 | 能做什么 | 使用价值 |
+| --- | --- | --- |
+| **源码驱动的项目导航** | `/init` 引导 agent 根据源码、配置解析和测试生成 `.ai/map.md` 与业务流程图；后续项目级任务引导按需读取相关文档并核验源码 | 建立可复用的项目上下文，不要求每次把全部文档塞入上下文 |
+| **可落盘、可审阅的 Plan** | 开启 Plan 后只允许探索、澄清和写当前计划；`/run-plan` 将用户授权记录写回文件，再启动实施 | 将目标、范围、方案和验收标准留在项目中，便于审阅及跨会话接续 |
+| **交互式需求澄清** | agent 通过 `questionnaire` 提出问题；支持多题选择、自由填写、回看修改和汇总提交 | 把关键分歧先问清楚，减少基于猜测实施 |
+| **少打扰的权限控制** | Default 放行白名单只读 Bash；Auto 自动运行沙箱内的普通命令和符合边界的文件写入 | 普通探索和开发无需反复确认，越界或提权时再审批 |
+| **Git 元数据保护** | Auto Bash 将当前仓库的 Git 元数据与 `.git` 入口只读挂载，包括 worktree 的独立和共享元数据 | 查看状态和差异不必审批，写 Git 元数据则需要显式提权 |
+| **三个模块按需组合** | Workflow、Permissions、Questionnaire 可分别启用；Plan 开关与权限档位互不改变 | 根据任务选择工作方式，不强制整套使用 |
+
+## 安装与快速开始
+
+需要已安装 Pi、Node.js **22.19+**。当前验证的 Pi 版本为 **0.84.4**。
+
+```bash
+pi install npm:pi-dev-kit
+```
+
+也可以从 GitHub 安装，二选一即可：
+
+```bash
+pi install git:github.com/Lytherion/pi-dev-kit
+```
+
+默认启用全部三个模块。**新会话默认 Plan 关闭、权限 Auto**；已有会话按当前分支恢复状态。
+
+Auto Bash 沙箱仅支持 **Linux/WSL**，需要 Git **2.31+**、Bash、bubblewrap 和可用的 user namespaces。Debian/Ubuntu 可安装：
+
+```bash
+sudo apt-get install git bash bubblewrap
+```
+
+依赖缺失或 namespace 不可用时，Auto Bash 会失败，**不会自动降级到无沙箱执行**。macOS、原生 Windows 不支持本包的 Auto Bash 沙箱，可按需只启用 Workflow/Questionnaire，或选择本地无沙箱的 Default/YOLO；这些平台尚未完成运行验证。
+
+安装后，在项目目录启动 `pi`。以下 `/init`、`/plan` 等命令均在 **Pi 会话中**输入，不是终端 Shell 命令。
+
+## 推荐使用流程
+
+```text
+理解项目 → 澄清需求 → 写 Plan → 审阅并授权 → 实施与验收 → 维护项目知识
+ /init                 /plan on   /run-plan
+```
+
+**1. 先建立项目导航。** 对已有项目，在项目根目录运行 `/init`。agent 会基于当前源码生成或同步项目地图和流程图；期间只开放读取、受限项目文档和同包问答工具，不修改业务代码、配置或 Plan，也不运行 Bash。完成后审阅覆盖范围、关键分支和未核验项，不能把生成文档视为已经验证的业务事实。
+
+```text
+.ai/
+├── map.md                 # 项目概览、入口和相关流程导航
+├── flows/                 # 可追溯到源码的业务流程图
+└── plan/                  # 具体任务的方案、授权与进度记录
+```
+
+**2. 澄清需求并写计划。** 运行 `/plan on`，从菜单选择现有 Plan，或输入符合 `YYYYMMDD-NN-topic.md` 的新文件名。选择新文件只是确定写入目标，不会立即创建文件。随后输入任务，例如：
+
+```text
+分析当前登录过期处理，先不要实施。
+
+请核验相关源码和调用方，必要时用 questionnaire 向我澄清需求。
+将目标、当前行为、拟改规则、影响范围、实施步骤和验收样例写入当前 Plan。
+```
+
+Plan 期间，agent 可使用内建读取工具、白名单只读 Bash、问答和仅写当前文件的 `plan_document`；不能修改业务代码或配置。问答回答只用于澄清，**不构成实施授权**。
+
+**3. 审阅后再启动实施。** 核对 Plan 是否回答了“为什么改、改哪里、哪些行为不能变、如何验收”。确认后运行 `/run-plan`，**亲自选中要执行的文件**。选中即授权按当前内容实施：插件先记录授权，再关闭 Plan 限制并启动任务；权限档位保持不变，Default 的后续受控写入仍需要确认。取消选择不会修改文件或开关。
+
+建议要求 agent 逐项记录进度与验证证据；发现范围扩大、业务契约冲突或信息不足时暂停询问。新会话可通过项目地图与同一份已授权 Plan 接续任务，而不是依赖旧聊天记忆。
+
+**4. 验收并维护知识。** 按改动风险检查测试、diff、受影响的共享调用方和实际业务结果。让 agent 更新受影响的 map/flow，或运行 `/init` 同步，再人工审阅；不要为无关的小修改反复全量生成文档。进度、验收和文档语义依赖 agent 与你的核验，不由命令自动保证，也不会自动提交、推送或回滚 Git。
+
+**小任务不必强制建 Plan**：可以在普通状态下直接交流方案，明确确认后实施。**全新项目先澄清目标并实现可核验的源码**，再用 `/init` 建立导航；空项目不能凭空还原业务流程。
+
+## 命令与权限速查
+
+| 命令 / 快捷键 | 作用 |
+| --- | --- |
+| `/init` | 关闭 Plan，临时限定工具维护 `.ai/map.md` 和 `.ai/flows/*.md`；结束恢复普通工具，不自动重启 Plan |
+| `/plan on` / `/plan off` | 开启规划限制 / 关闭限制并恢复原工具集，不改变权限档位 |
+| `/plan` / `Alt+N` | 切换 Plan 开关；开启时选择文件，忙碌或 `/init` 期间不可切换 |
+| `/run-plan` | 选择 Plan、记录授权并启动实施，不改变权限档位 |
+| `/permission default\|auto\|yolo` | 选择权限档位；不带参数打开选择菜单 |
+| `Alt+M` | 循环切换 Default → Auto → YOLO |
+| `questionnaire` | agent 调用的问答工具，不是用户输入的斜杠命令；取消或非 TUI 视为未回答 |
+
+**Plan 是工具限制，不是独立执行模式。** 只有开启时显示 `Plan` 状态；关闭只是恢复普通工具，**不代表任务获得授权**。插件没有强制所有普通任务先经过 `/run-plan` 的执行锁；YOLO 也不能绕过 Plan 的工具限制。
+
+| 权限档位 | 受控文件写入 / 文档删除 | Bash |
+| --- | --- | --- |
+| **Default** | 逐次确认 | 未申请提权的白名单只读命令免审批；其余逐次确认。执行时无沙箱 |
+| **Auto**（默认） | 项目及系统临时目录中的普通目标自动允许；Git 保护路径、已有硬链接或其他路径需确认 | 普通命令自动走沙箱；项目与系统临时目录可写，其他位置及当前 Git 元数据只读 |
+| **YOLO** | 本包不加权限提示 | 本包不加权限提示或沙箱；仍受 Plan 与 `/init` 限制 |
+
+Auto 下写 Git 元数据或沙箱外路径时，模型需显式传入 `sandbox_permissions="require_escalated"` 和简短 `escalation_reason`。**批准会解除该次 Bash 的整个沙箱，不是只开放某个路径。** 需要审批时，没有交互界面、拒绝或取消都不会执行。
+
+Default 和 Plan 共享保守的只读 Bash 白名单，典型支持：
+
+```bash
+pwd
+ls -alh src
+git status --short --branch
+git log --oneline -n 10
+git diff --stat
+git diff --cached --name-only
+```
+
+这不是任意只读命令识别器：仅支持单条命令、简单 ASCII 参数和明确允许的选项。引号、非 ASCII 参数、通配符、替换、重定向、管道、连接符、脚本、多行和未知参数，**Default 询问、Plan 拒绝**；复杂路径读取可改用内建 `read/grep/find/ls`。完整规则见 [`extensions/lib/read-only.ts`](extensions/lib/read-only.ts)。
+
+Default 免审批或 Plan 允许的 Git 查看会禁用分页、可选索引写入、fsmonitor，`log/diff` 另禁用 external diff 和 textconv。普通状态下 Auto/YOLO 不因白名单而改写命令。
+
+## 按需启用与旧包迁移
+
+运行 `pi config`，在本包下选择需要的扩展：
+
+| 模块 | 入口 | 负责范围 |
+| --- | --- | --- |
+| Workflow | `extensions/workflow.ts` | Plan、项目导航、文档工具及任务入口 |
+| Permissions | `extensions/permissions.ts` | 三档权限、受控写入审批与 Bash 沙箱 |
+| Questionnaire | `extensions/questionnaire.ts` | 交互式多题问答 |
+
+模块可独立运行。未启用 Permissions 时，Workflow 的受限文档写入不经过本包权限确认，但路径与工具限制仍生效。Plan 只接受内建或同包 Permissions 的 Bash，以及同包 Questionnaire；未经核验的第三方同名工具不会进入受信工具集。
+
+本项目承接 `pi-simple-permissions` 的后续开发。旧包不会因新包安装而自动移除；先用 `pi list` 确认来源，避免同时加载两份扩展。旧包来自 npm 时：
+
+```bash
+pi remove npm:pi-simple-permissions
+pi install npm:pi-dev-kit
+```
+
+Git 或本地路径安装按列表中的实际来源移除；项目级安装使用 `--local`。迁移后检查模块配置与权限档位，按需开启 Plan。
+
+## 使用边界与发布验证
+
+- **Git 保护不是所有 Git 命令的禁令。** Auto 保护调用开始时当前仓库的元数据；仅改工作区的操作、临时目录中的其他仓库或命令中新建的仓库不在同一保护范围内。
+- **检查失败不等于批准。** Auto 文件目标按符号链接真实路径判断，能解析但越界时询问；断开链接、损坏 Git 元数据或保护路径发现失败，使依赖该检查的当前调用报错，不自动询问或降级，也不自动终止整个 agent 会话。符号链接形式的 `.git` 入口不支持 Auto，Bash 需显式申请提权。
+- **不是恶意程序安全沙箱。** 白名单依赖可信的宿主 Bash、PATH 和标准程序，不防恶意启动脚本、Shell 函数或被替换程序。沙箱不隔离读取，网络仍开放；Bash 硬链接、并发路径替换、本地服务及其他扩展/工具不提供完整对抗性保护。用户直接运行的终端命令不受本包工具限制。只加载可信扩展，批准提权前审阅完整命令。
+
+Pi 直接加载 TypeScript 扩展，无须构建 JavaScript 产物。npm 包只包含安装所需文件：`extensions/`、中英文 README、LICENSE 和 `package.json`。Git 仓库另外保留 `.gitignore`，避免将本地开发资料提交。内部文档、测试、开发配置和锁文件保留在维护者的本地工作区，不公开发布。
+
+发布检查在本地、`npm publish` 前运行，覆盖严格类型及未使用代码、Plan/权限/问答行为、真实 bwrap 和 Git/worktree 保护，以及实际 npm 包的 Pi 加载。没有 GitHub CI；仅克隆公开仓库不包含运行这些开发检查所需的文件。
+
+本项目使用 MIT 许可证。

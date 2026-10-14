@@ -1,15 +1,12 @@
-import { existsSync, realpathSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
   createBashTool,
-  createLocalBashOperations,
-  type BashOperations,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { createSandboxOperations, isAutoWritePath } from "./lib/sandbox.ts";
+import { readOnlyBash } from "./lib/read-only.ts";
 
 type PermissionMode = "default" | "auto" | "yolo";
 
@@ -30,96 +27,6 @@ const MODE_LABELS: Record<PermissionMode, string> = {
   yolo: "YOLO",
 };
 
-const READ_ONLY_GIT = new Set([
-  "--version",
-  "diff",
-  "grep",
-  "help",
-  "log",
-  "ls-files",
-  "rev-parse",
-  "show",
-  "status",
-  "version",
-]);
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-function canonicalPath(input: string, cwd: string): string {
-  const value = input.startsWith("@") ? input.slice(1) : input;
-  const expanded = value === "~" || value.startsWith("~/")
-    ? resolve(homedir(), value.slice(2))
-    : value;
-  const target = isAbsolute(expanded) ? resolve(expanded) : resolve(cwd, expanded);
-
-  let current = target;
-  const missing: string[] = [];
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) break;
-    missing.unshift(basename(current));
-    current = parent;
-  }
-
-  const base = existsSync(current) ? realpathSync(current) : current;
-  return resolve(base, ...missing);
-}
-
-function isWithin(root: string, target: string): boolean {
-  const path = relative(root, target);
-  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
-}
-
-function isAutoWritePath(path: string, cwd: string): boolean {
-  const target = canonicalPath(path, cwd);
-  const project = canonicalPath(cwd, cwd);
-  const temp = canonicalPath(tmpdir(), cwd);
-  return isWithin(project, target) || isWithin(temp, target);
-}
-
-function gitSubcommands(command: string): string[] {
-  const matches = command.matchAll(/\bgit(?:\s+(?:-[Cc])\s+\S+|\s+-c\s+\S+)*\s+([^\s;&|]+)/gi);
-  return [...matches].map((match) => match[1].toLowerCase());
-}
-
-function mutatesGit(command: string): boolean {
-  return gitSubcommands(command).some((subcommand) => !READ_ONLY_GIT.has(subcommand));
-}
-
-function sandboxCommand(command: string, cwd: string): string {
-  const project = canonicalPath(cwd, cwd);
-  const temp = canonicalPath(tmpdir(), cwd);
-  const writable = [...new Set([project, temp])];
-  const args = [
-    "bwrap",
-    "--die-with-parent",
-    "--unshare-all",
-    "--share-net",
-    "--new-session",
-    "--ro-bind", "/", "/",
-    "--dev", "/dev",
-    "--proc", "/proc",
-    "--chdir", cwd,
-  ];
-
-  for (const root of writable) {
-    args.push("--bind", root, root);
-  }
-  args.push("--", "sh", "-lc", command);
-  return args.map(shellQuote).join(" ");
-}
-
-function createSandboxOperations(): BashOperations {
-  const local = createLocalBashOperations();
-  return {
-    exec(command, cwd, options) {
-      return local.exec(sandboxCommand(command, cwd), cwd, options);
-    },
-  };
-}
-
 async function approve(
   ctx: ExtensionContext,
   title: string,
@@ -129,11 +36,26 @@ async function approve(
   if (!ctx.hasUI || signal?.aborted) return false;
   const options = signal ? { signal } : undefined;
   const choice = await ctx.ui.select(`${title}\n\n${detail}`, ["Allow once", "Deny"], options);
-  return choice === "Allow once";
+  return choice === "Allow once" && !signal?.aborted;
 }
 
 export default function simplePermissions(pi: ExtensionAPI): void {
   let mode: PermissionMode = "auto";
+
+  pi.events.on("pi-dev-kit:approve-document-write", (data) => {
+    const request = data as {
+      ctx: ExtensionContext;
+      path: string;
+      action: "write" | "delete";
+      signal?: AbortSignal;
+      respond: (decision: Promise<boolean>) => void;
+    };
+    request.respond((async () => {
+      if (request.signal?.aborted) return false;
+      if (mode === "yolo" || (mode === "auto" && isAutoWritePath(request.path, request.ctx.cwd))) return true;
+      return approve(request.ctx, `${MODE_LABELS[mode]} permission request`, `${request.action}: ${request.path}`, request.signal);
+    })());
+  });
 
   function updateStatus(ctx: ExtensionContext): void {
     let color: "accent" | "muted" | "warning" = "muted";
@@ -188,7 +110,7 @@ export default function simplePermissions(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (_event, ctx) => {
-    const entry = ctx.sessionManager.getEntries()
+    const entry = ctx.sessionManager.getBranch()
       .filter((item) => item.type === "custom" && item.customType === "simple-permissions")
       .pop() as { data?: PermissionState } | undefined;
     const savedMode = entry?.data?.mode;
@@ -203,7 +125,7 @@ export default function simplePermissions(pi: ExtensionAPI): void {
     if (mode === "yolo") {
       boundaryText = "\n\n## Permission boundary\n\nThe active permission mode is YOLO. There are no restrictions. You have full system access without manual approval.";
     } else {
-      boundaryText = `\n\n## Permission boundary\n\nThe active permission mode is ${MODE_LABELS[mode]}. Network access and network-search tools are allowed in every mode. In Auto mode, bash is sandboxed so only the current working directory and /tmp are writable. For a necessary write outside those roots, call bash with sandbox_permissions=\"require_escalated\" and a concise escalation_reason. Mutating Git commands always require user approval; read-only Git inspection does not.`;
+      boundaryText = `\n\n## Permission boundary\n\nThe active permission mode is ${MODE_LABELS[mode]}. Network access and network-search tools are allowed in every mode. In Auto mode, ordinary bash runs automatically in a Linux/WSL filesystem sandbox: the current working directory and the system temporary directory are writable, but the current repository's Git metadata and .git entry are read-only. Git inspection works without approval. For a necessary Git metadata write or write outside those roots, call bash with sandbox_permissions=\"require_escalated\" and a concise escalation_reason; approval removes the sandbox for that call. This does not police every Git command or other repositories, and is not an adversarial security sandbox. Default confirms controlled writes and Bash outside the shared read-only whitelist. Simple pwd, basic ls, and supported git status/log/diff forms run without approval; quoting, operators, substitutions, redirection, scripts, and unknown options require approval. In Default and Plan, recognized Git inspection disables optional locks, fsmonitor, external diff and textconv. Plan restrictions still apply in every permission mode.`;
     }
     return { systemPrompt: `${event.systemPrompt}${boundaryText}` };
   });
@@ -211,8 +133,20 @@ export default function simplePermissions(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     const callMode = mode;
     if (callMode === "yolo") return;
+    if (event.toolName === "bash") {
+      const owner = pi.getCommands().find((command) => command.name === "permission" && command.source === "extension")?.sourceInfo;
+      const bash = pi.getAllTools().find((tool) => tool.name === "bash");
+      if (!owner || !bash || bash.sourceInfo.path !== owner.path || bash.sourceInfo.source !== owner.source) {
+        return { block: true, reason: "受控 bash 已被其他扩展覆盖；Default/Auto 模式拒绝执行" };
+      }
+      return;
+    }
     if (event.toolName !== "write" && event.toolName !== "edit") return;
 
+    const tool = pi.getAllTools().find((item) => item.name === event.toolName);
+    if (tool?.sourceInfo.source !== "builtin") {
+      return { block: true, reason: "受控写入工具已被其他扩展覆盖；Default/Auto 模式拒绝执行" };
+    }
     const path = String(event.input.path ?? "");
     const needsApproval = callMode === "default" || !isAutoWritePath(path, ctx.cwd);
     if (!needsApproval) return;
@@ -254,20 +188,18 @@ export default function simplePermissions(pi: ExtensionAPI): void {
     label: "bash (permissioned)",
     executionMode: "sequential",
     parameters: bashParameters,
-    description: `${template.description}\n\nIn Auto mode, bash can write only inside the current working directory and /tmp. Use sandbox_permissions=\"require_escalated\" only when a necessary operation must write elsewhere. Network access is unrestricted. Mutating Git commands require approval.`,
+    description: `${template.description}\n\nDefault automatically permits only simple pwd, basic ls, and supported git status/log/diff forms from the shared read-only whitelist; other commands require approval. Recognized Git inspection disables optional locks, fsmonitor, external diff and textconv. Auto runs bash automatically in a Linux/WSL filesystem sandbox. Only the current working directory and system temporary directory are writable; the current repository's Git metadata and .git entry are read-only. If an operation requires a Git metadata write or a write elsewhere, request sandbox_permissions=\"require_escalated\" with a concise escalation_reason. Approval removes the sandbox for this call. Network access is unrestricted.`,
     async execute(toolCallId, params: BashParams, signal, onUpdate, ctx) {
       const callMode = mode;
       const command = params.command.trim();
       const escalated = params.sandbox_permissions === "require_escalated";
-      const gitMutation = mutatesGit(command);
-      const isYolo = callMode === "yolo";
-      const needsApproval = !isYolo && (callMode === "default" || escalated || gitMutation);
+      const inspection = callMode === "default" && !escalated ? readOnlyBash(params.command) : undefined;
+      const needsApproval = callMode !== "yolo" && ((callMode === "default" && !inspection) || escalated);
 
       if (needsApproval) {
         const reasons = [
           callMode === "default" ? "Default mode" : undefined,
           escalated ? `filesystem escalation${params.escalation_reason ? `: ${params.escalation_reason}` : ""}` : undefined,
-          gitMutation ? "mutating Git command" : undefined,
         ].filter(Boolean).join("; ");
         const allowed = await approve(
           ctx,
@@ -276,27 +208,22 @@ export default function simplePermissions(pi: ExtensionAPI): void {
           signal,
         );
         if (!allowed) {
-          return {
-            content: [{
-              type: "text",
-              text: signal?.aborted
-                ? "Operation aborted"
-                : ctx.hasUI
-                  ? "Permission denied by user"
-                  : "Permission required, but no interactive UI is available",
-            }],
-            details: undefined,
-          };
+          throw new Error(signal?.aborted
+            ? "Operation aborted"
+            : ctx.hasUI
+              ? "Permission denied by user"
+              : "Permission required, but no interactive UI is available");
         }
       }
 
-      const useSandbox = callMode === "auto" && !escalated && !isYolo;
+      signal?.throwIfAborted();
+      const useSandbox = callMode === "auto" && !escalated;
       const tool = useSandbox
         ? createBashTool(ctx.cwd, { operations: createSandboxOperations() })
         : createBashTool(ctx.cwd);
       return tool.execute(
         toolCallId,
-        { command, timeout: params.timeout },
+        { command: inspection ?? command, timeout: params.timeout },
         signal,
         onUpdate,
       );
