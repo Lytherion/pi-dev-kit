@@ -69,11 +69,11 @@ Present the goals, current behavior, proposed rules, affected scope, implementat
 and acceptance examples in the conversation first. Do not save a document yet.
 ```
 
-When you explicitly ask to save the proposal, the agent calls `plan_document`. On the first save, it asks you to select an existing Plan or enter a new filename matching `YYYYMMDD-NN-topic.md`; canceling leaves planning enabled without writing a file. A successful save remembers the document for subsequent updates and session resume.
+When you explicitly ask to save the proposal, the agent calls `plan_document`. If no document is bound and Plans exist, choose whether to modify an existing Plan or create a new one. For an existing Plan, select it with the arrow keys; the agent reads and merges its contents before saving. With no files, creation starts directly. The agent offers Chinese/English semantic names plus a custom-name option; enter only the topic, and the tool generates `YYYYMMDD-NN-topic.md` using today's date and the next sequence. Canceling leaves files and the binding unchanged. The first successful save binds the document; subsequent saves update it without selection dialogs.
 
 While Plan is enabled, the agent can use built-in reading tools, allowlisted read-only Bash, the questionnaire, and `plan_document`, which can only write the selected file. It cannot change business code or configuration. Questionnaire answers and saving a proposal **do not authorize implementation**.
 
-**3. Review before starting implementation.** Check that the Plan explains why a change is needed, what will change, which behaviors must remain, and how to verify the result. Once satisfied, run `/run-plan` and **personally select the file to execute**. Selection authorizes implementation according to its current contents: the extension first records authorization, then turns Plan off and starts the task. The permission mode stays unchanged; subsequent controlled writes in Default still require confirmation. Canceling the selection changes neither the file nor the toggle.
+**3. Review before starting implementation.** Check that the Plan explains why a change is needed, what will change, which behaviors must remain, and how to verify the result. Once satisfied, run `/run-plan`, which always shows the Plan list, putting the bound document first (otherwise defaulting to the first item). Use the arrow keys and **press Enter to authorize execution immediately**, without a second confirmation. Implementation follows the selected file's current contents: the extension first records authorization, then turns Plan off and starts the task. The permission mode stays unchanged; subsequent controlled writes in Default still require confirmation. Canceling the selection changes neither the file nor the toggle.
 
 Ask the agent to record progress and verification evidence step by step, and to pause for clarification if scope expands, business contracts conflict, or information is insufficient. A new session can continue from the project map and the same authorized Plan rather than relying on previous chat memory.
 
@@ -88,12 +88,14 @@ Ask the agent to record progress and verification evidence step by step, and to 
 | `/init` | Turns Plan off and temporarily restricts tools to maintain `.ai/map.md` and `.ai/flows/*.md`; restores ordinary tools afterward without re-enabling Plan |
 | `/plan on` / `/plan off` | Enables planning restrictions / disables them and restores the original tool set; leaves permissions unchanged |
 | `/plan` / `Alt+N` | Toggles Plan without file selection or creation. Switching is blocked while busy or during `/init` |
-| `/run-plan` | Selects a Plan, records authorization, and starts implementation without changing permissions |
+| `/plan select` | Binds an existing or new Plan without changing mode; new documents are created only on first save |
+| `/plan clear` | Clears the binding without deleting files or changing mode |
+| `/run-plan` | Always lists Plans with the bound one first; Enter records authorization and starts implementation without changing permissions |
 | `/permission default\|auto\|yolo` | Selects a permission mode; without arguments, opens the mode menu |
 | `Alt+M` | Cycles Default → Auto → YOLO |
 | `questionnaire` | An agent tool, not a user slash command; cancellation or non-TUI execution counts as unanswered |
 
-**Plan is a tool restriction, not a separate execution mode.** The `Plan` status appears only while enabled. Turning it off restores ordinary tools; **it does not authorize a task**. The extension does not require every ordinary task to pass through `/run-plan`. YOLO cannot bypass Plan restrictions.
+**Plan is a tool restriction, not a separate execution mode.** While enabled, the status shows `Plan · filename` (or just `Plan` without a binding); when disabled, the binding remains visible as `当前计划 · filename`. Existing sessions restore the binding; new sessions clear it. Turning Plan off restores ordinary tools; **binding, switching, and saving do not authorize a task**. The extension does not require every ordinary task to pass through `/run-plan`. YOLO cannot bypass Plan restrictions.
 
 | Permission mode | Controlled file writes / document deletions | Bash |
 | --- | --- | --- |
