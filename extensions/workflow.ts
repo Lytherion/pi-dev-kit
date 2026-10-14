@@ -147,8 +147,7 @@ export function registerWorkflow(pi: ExtensionAPI, allowDocumentWrite: (ctx: Ext
 
   function setPlan(enabled: boolean, ctx: ExtensionContext, name = currentPlan): void {
     if (enabled) {
-      if (!name) throw new Error("请先通过 /plan on 选择或创建当前 Plan");
-      planPath(ctx.cwd, name);
+      if (name) planPath(ctx.cwd, name);
       if (!planToolAvailable()) throw new Error("当前 Plan 写入工具被其他扩展覆盖或不可用");
       if (!planEnabled) toolsBeforePlan = pi.getActiveTools().filter((tool) => !workflowTools.has(tool));
       pi.setActiveTools(available([...safeTools]));
@@ -165,15 +164,19 @@ export function registerWorkflow(pi: ExtensionAPI, allowDocumentWrite: (ctx: Ext
   pi.registerTool({
     name: "plan_document",
     label: "Current Plan",
-    description: "Only in Plan Mode: create or replace the selected Plan document. Read it first when updating. No other file is writable.",
+    description: "Only in Plan Mode and when the user explicitly requests saving: create or replace the current Plan document. If none is selected, ask the user to select or name one. Read existing Plans before updating. No other file is writable.",
     parameters: Type.Object({ content: Type.String({ description: "Complete Markdown for the selected Plan" }) }),
     async execute(_id, params, signal, _update, ctx) {
-      if (!planEnabled || !currentPlan) throw new Error("未处于 Plan Mode 或未选择 Plan");
-      const target = planPath(ctx.cwd, currentPlan);
+      if (!planEnabled) throw new Error("未处于 Plan Mode");
+      signal?.throwIfAborted();
+      const name = currentPlan ?? await choosePlan(ctx);
+      if (!name) throw new Error("未选择 Plan，未保存文档；仍处于规划模式");
+      const target = planPath(ctx.cwd, name);
       signal?.throwIfAborted();
       if (!await allowDocumentWrite(ctx, target, "write", signal)) throw new Error("用户未允许写入当前 Plan");
-      await savePlan(ctx.cwd, currentPlan, params.content, undefined, signal);
-      return { content: [{ type: "text", text: `已更新 .ai/plan/${currentPlan}` }], details: undefined };
+      await savePlan(ctx.cwd, name, params.content, undefined, signal);
+      if (currentPlan !== name) setPlan(true, ctx, name);
+      return { content: [{ type: "text", text: `已更新 .ai/plan/${name}` }], details: undefined };
     },
   });
 
@@ -223,9 +226,7 @@ export function registerWorkflow(pi: ExtensionAPI, allowDocumentWrite: (ctx: Ext
 
   async function configurePlan(enabled: boolean, ctx: ExtensionContext): Promise<void> {
     if (initActive || !ctx.isIdle()) { ctx.ui.notify("请等待当前任务结束后再切换 Plan", "warning"); return; }
-    if (!enabled) { setPlan(false, ctx); return; }
-    const name = await choosePlan(ctx);
-    if (name) setPlan(true, ctx, name);
+    setPlan(enabled, ctx);
   }
 
   pi.registerCommand("plan", {
@@ -319,7 +320,7 @@ export function registerWorkflow(pi: ExtensionAPI, allowDocumentWrite: (ctx: Ext
   pi.on("before_agent_start", (event) => {
     const guide = navigationHintSent ? "" : "\n\n## Project navigation\nFor project-level tasks in a new session, first read .ai/map.md when it exists; then read only relevant flows and verify current source and tests. For narrow questions with explicit paths, navigate directly. Do not inject the whole map every turn.";
     navigationHintSent = true;
-    const plan = planEnabled ? `\n\n## Plan Mode\nExplore without side effects. Bash permits only simple read-only whitelist forms: pwd, ls -alh, git status --short, git log --oneline -n 10, git diff --stat, and their supported options. No quoting, expansion, redirection, compound commands, scripts, unknown options or escalation. Use native read/grep/find/ls for other inspection. Git inspection disables optional locks, fsmonitor, external diff and textconv. Only the selected Plan .ai/plan/${currentPlan} may be created or updated through plan_document. No business source, configuration or flow changes. A Plan is not execution authorization.` : "";
+    const plan = planEnabled ? `\n\n## Plan Mode\nExplore without side effects. Bash permits only simple read-only whitelist forms: pwd, ls -alh, git status --short, git log --oneline -n 10, git diff --stat, and their supported options. No quoting, expansion, redirection, compound commands, scripts, unknown options or escalation. Use native read/grep/find/ls for other inspection. Git inspection disables optional locks, fsmonitor, external diff and textconv. Discuss requirements and present proposals in the conversation first. Do not ask the user to select or create a Plan just to discuss a task. Only call plan_document when the user explicitly requests saving a proposal. ${currentPlan ? `Only the current Plan .ai/plan/${currentPlan} may be updated through plan_document.` : "No Plan is selected and no file needs to be created. On the first save, plan_document will ask the user to select an existing Plan or name a new one."} No business source, configuration or flow changes. Saving a Plan is not execution authorization.` : "";
     return { systemPrompt: event.systemPrompt + guide + plan };
   });
 
@@ -334,7 +335,7 @@ export function registerWorkflow(pi: ExtensionAPI, allowDocumentWrite: (ctx: Ext
     const savedTools = entry?.data?.tools;
     const baseline = event.reason !== "new" && Array.isArray(savedTools) ? savedTools.filter((name) => typeof name === "string" && !workflowTools.has(name) && pi.getAllTools().some((tool) => tool.name === name)) : undefined;
     toolsBeforePlan = baseline ?? previousTools ?? pi.getActiveTools().filter((name) => !workflowTools.has(name));
-    if (planEnabled && currentPlan && planToolAvailable()) {
+    if (planEnabled && planToolAvailable()) {
       pi.setActiveTools(available([...safeTools]));
     } else {
       planEnabled = false;

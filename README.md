@@ -59,17 +59,19 @@ Understand → Clarify → Write a Plan → Review and authorize → Implement a
 └── plan/                  # Task plans, authorization, and progress records
 ```
 
-**2. Clarify requirements and write the plan.** Run `/plan on` and select an existing Plan or enter a new filename matching `YYYYMMDD-NN-topic.md`. Selecting a new file only sets the write target; it does not create the file immediately. Then describe your task, for example:
+**2. Clarify requirements, then save if needed.** Run `/plan` or `/plan on` to enter read-only planning immediately, without selecting or creating a file. Describe your task, for example:
 
 ```text
 Analyze the current login-expiration behavior. Do not implement yet.
 
 Verify the relevant source and callers, and use questionnaire to clarify requirements if needed.
-Write the goals, current behavior, proposed rules, affected scope, implementation steps,
-and acceptance examples into the selected Plan.
+Present the goals, current behavior, proposed rules, affected scope, implementation steps,
+and acceptance examples in the conversation first. Do not save a document yet.
 ```
 
-While Plan is enabled, the agent can use built-in reading tools, allowlisted read-only Bash, the questionnaire, and `plan_document`, which can only write the selected file. It cannot change business code or configuration. Questionnaire answers clarify requirements; **they do not authorize implementation**.
+When you explicitly ask to save the proposal, the agent calls `plan_document`. On the first save, it asks you to select an existing Plan or enter a new filename matching `YYYYMMDD-NN-topic.md`; canceling leaves planning enabled without writing a file. A successful save remembers the document for subsequent updates and session resume.
+
+While Plan is enabled, the agent can use built-in reading tools, allowlisted read-only Bash, the questionnaire, and `plan_document`, which can only write the selected file. It cannot change business code or configuration. Questionnaire answers and saving a proposal **do not authorize implementation**.
 
 **3. Review before starting implementation.** Check that the Plan explains why a change is needed, what will change, which behaviors must remain, and how to verify the result. Once satisfied, run `/run-plan` and **personally select the file to execute**. Selection authorizes implementation according to its current contents: the extension first records authorization, then turns Plan off and starts the task. The permission mode stays unchanged; subsequent controlled writes in Default still require confirmation. Canceling the selection changes neither the file nor the toggle.
 
@@ -77,7 +79,7 @@ Ask the agent to record progress and verification evidence step by step, and to 
 
 **4. Verify and maintain project knowledge.** Review tests, diffs, affected shared callers, and actual business results according to the risk of the change. Ask the agent to update affected maps/flows, or run `/init` to synchronize them, then review the output. Avoid regenerating everything for unrelated small changes. Progress, acceptance, and documentation semantics depend on the agent's work and your review—not automatic command guarantees. The toolkit does not automatically commit, push, or roll back Git changes.
 
-**Small tasks do not require a persistent Plan.** Discuss the approach in the ordinary tool state and explicitly confirm implementation. **For a new project, clarify goals and implement source that can be verified first**, then use `/init`; an empty project cannot yield an evidence-based business flow.
+**Small tasks do not require a persistent Plan.** Discuss the approach in read-only Plan mode without saving a file, then turn Plan off and explicitly confirm implementation. **For a new project, clarify goals and implement source that can be verified first**, then use `/init`; an empty project cannot yield an evidence-based business flow.
 
 ## Commands and permissions
 
@@ -85,7 +87,7 @@ Ask the agent to record progress and verification evidence step by step, and to 
 | --- | --- |
 | `/init` | Turns Plan off and temporarily restricts tools to maintain `.ai/map.md` and `.ai/flows/*.md`; restores ordinary tools afterward without re-enabling Plan |
 | `/plan on` / `/plan off` | Enables planning restrictions / disables them and restores the original tool set; leaves permissions unchanged |
-| `/plan` / `Alt+N` | Toggles Plan; enabling it requires file selection. Switching is blocked while busy or during `/init` |
+| `/plan` / `Alt+N` | Toggles Plan without file selection or creation. Switching is blocked while busy or during `/init` |
 | `/run-plan` | Selects a Plan, records authorization, and starts implementation without changing permissions |
 | `/permission default\|auto\|yolo` | Selects a permission mode; without arguments, opens the mode menu |
 | `Alt+M` | Cycles Default → Auto → YOLO |
