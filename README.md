@@ -141,14 +141,10 @@ pi install npm:pi-dev-kit
 
 For Git or local installations, remove the actual source shown in the list; use `--local` for project-level installations. After migration, review module settings and the permission mode, then enable Plan as needed.
 
-## Boundaries and release validation
+## Security and limitations
 
 - **Git protection does not prohibit every Git command.** Auto protects the current repository's metadata as discovered at the start of the call. Operations that only modify working-tree files, other repositories in temporary directories, and repositories created during the command are not covered by the same protection.
 - **A failed check is not approval.** Auto file targets are judged by their real symlink destinations; resolvable targets outside the permitted boundary require confirmation. Dangling links, damaged Git metadata, or failure to discover protected paths cause the current call that relies on that check to fail—without automatic approval prompts, fallback, or automatic termination of the entire agent session. Symlinked `.git` entries are unsupported in Auto; Bash requires explicit escalation.
 - **This is not an adversarial security sandbox.** The allowlist assumes a trusted host Bash, PATH, and standard programs; it does not defend against malicious startup scripts, shell functions, or replaced executables. The sandbox does not isolate reads, and network access remains open. Bash hard links, concurrent path replacement, local services, and other extensions/tools do not have complete adversarial protection. Terminal commands run directly by the user are outside this package's tool restrictions. Load only trusted extensions and review the full command before approving escalation.
-
-Pi loads the TypeScript extensions directly; no JavaScript build output is required. The npm package contains only the installable files: `extensions/`, English and Chinese READMEs, LICENSE, and `package.json`. The Git repository also includes `.gitignore` to keep local development files out of commits. Internal documents, tests, development configuration, and the lockfile are kept in the maintainer's local workspace, not published.
-
-Release checks run locally before `npm publish`: strict types and unused code, Plan/permission/questionnaire behavior, real bwrap and Git/worktree protection, and loading the actual npm package through Pi. There is no GitHub CI; the public checkout alone does not include the files needed to run those development checks.
 
 Licensed under MIT.
