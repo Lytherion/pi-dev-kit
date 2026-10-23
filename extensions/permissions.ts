@@ -1,4 +1,3 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import {
   createBashTool,
   type ExtensionAPI,
@@ -13,8 +12,6 @@ type PermissionMode = "default" | "auto" | "yolo";
 interface BashParams {
   command: string;
   timeout?: number;
-  sandbox_permissions?: "require_escalated";
-  escalation_reason?: string;
 }
 
 interface PermissionState {
@@ -125,7 +122,7 @@ export default function simplePermissions(pi: ExtensionAPI): void {
     if (mode === "yolo") {
       boundaryText = "\n\n## Permission boundary\n\nThe active permission mode is YOLO. There are no restrictions. You have full system access without manual approval.";
     } else {
-      boundaryText = `\n\n## Permission boundary\n\nThe active permission mode is ${MODE_LABELS[mode]}. Network access and network-search tools are allowed in every mode.\n\nAuto: Bash commands run automatically inside a Linux/WSL filesystem sandbox. Omit sandbox_permissions and escalation_reason for normal calls. The current working directory and system temporary directory are writable; the current repository's Git metadata and .git entry are read-only. Read-only commands, network access, Python/uv, quoting, pipes, redirection, and scripts do not by themselves require escalation. Request sandbox_permissions="require_escalated" only when a necessary operation is known to require writing outside those writable roots or to protected Git metadata, or when a sandbox failure identifies that requirement. The escalation_reason must identify the restricted filesystem path and necessary operation, not merely describe the task. Approval runs this call outside the sandbox. This does not police every Git command or other repositories, and is not an adversarial security sandbox.\n\nDefault: Controlled writes and Bash commands outside the shared read-only whitelist require approval. Only accepted simple pwd, basic ls, and supported git status/log/diff forms run without approval; quoting, operators, substitutions, redirection, scripts, and unknown options require approval in Default.\n\nPlan restrictions apply independently in every permission mode. In Default and Plan, recognized Git inspection disables optional locks, fsmonitor, external diff and textconv.`;
+      boundaryText = `\n\n## Permission boundary\n\nThe active permission mode is ${MODE_LABELS[mode]}. Network access and network-search tools are allowed in every mode.\n\nAuto: bash always runs inside a Linux/WSL filesystem sandbox without approval. The current working directory and system temporary directory are writable; the current repository's Git metadata and .git entry are read-only. Use bash for normal calls, including read-only commands, network access, Python/uv, tests, and complex shell syntax. Use bash_escalated only for necessary writes outside those writable roots or to protected Git metadata; provide the restricted path and necessary operation. Default/Auto require user approval for bash_escalated. Approval removes the entire sandbox for that call, not just protection on the declared path. This does not police every Git command or other repositories, and is not an adversarial security sandbox.\n\nDefault: Controlled writes and Bash commands outside the shared read-only whitelist require approval. Only accepted simple pwd, basic ls, and supported git status/log/diff forms run without approval; quoting, operators, substitutions, redirection, scripts, and unknown options require approval in Default.\n\nPlan restrictions apply independently in every permission mode. In Default and Plan, recognized Git inspection disables optional locks, fsmonitor, external diff and textconv.`;
     }
     return { systemPrompt: `${event.systemPrompt}${boundaryText}` };
   });
@@ -133,9 +130,9 @@ export default function simplePermissions(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     const callMode = mode;
     if (callMode === "yolo") return;
-    if (event.toolName === "bash") {
+    if (event.toolName === "bash" || event.toolName === "bash_escalated") {
       const owner = pi.getCommands().find((command) => command.name === "permission" && command.source === "extension")?.sourceInfo;
-      const bash = pi.getAllTools().find((tool) => tool.name === "bash");
+      const bash = pi.getAllTools().find((tool) => tool.name === event.toolName);
       if (!owner || !bash || bash.sourceInfo.path !== owner.path || bash.sourceInfo.source !== owner.source) {
         return { block: true, reason: "受控 bash 已被其他扩展覆盖；Default/Auto 模式拒绝执行" };
       }
@@ -173,14 +170,7 @@ export default function simplePermissions(pi: ExtensionAPI): void {
   const bashParameters = Type.Object({
     command: Type.String({ description: "Bash command to execute" }),
     timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
-    sandbox_permissions: Type.Optional(StringEnum(["require_escalated"] as const, {
-      description: "Omit for normal calls. Set require_escalated only when a necessary operation requires writing outside the Auto sandbox's writable roots or to protected Git metadata. Read-only commands, network access, and command complexity alone do not justify escalation. Requires user approval in Default/Auto.",
-    })),
-    escalation_reason: Type.Optional(Type.String({
-      maxLength: 100,
-      description: "Omit unless requesting escalation. Identify the restricted filesystem path and necessary operation; do not merely describe the task's purpose.",
-    })),
-  });
+  }, { additionalProperties: false });
 
   pi.registerTool({
     ...template,
@@ -188,45 +178,44 @@ export default function simplePermissions(pi: ExtensionAPI): void {
     label: "bash (permissioned)",
     executionMode: "sequential",
     parameters: bashParameters,
-    description: `${template.description}\n\nAuto: Normal Bash calls run automatically inside a Linux/WSL filesystem sandbox. Omit sandbox_permissions and escalation_reason for normal calls. Only the current working directory and system temporary directory are writable; the current repository's Git metadata and .git entry are read-only. Read-only commands, network access, Python/uv, and shell syntax are not escalation reasons by themselves. Request sandbox_permissions="require_escalated" only when a necessary operation is known to require writing outside those writable roots or to protected Git metadata, or when a sandbox failure identifies that requirement. The escalation_reason must identify the restricted filesystem path and necessary operation, not merely describe the task. Approval runs this call outside the sandbox.\n\nDefault: Only simple pwd, basic ls, and supported git status/log/diff forms accepted by the shared read-only whitelist run without approval; other commands require approval. Recognized Git inspection disables optional locks, fsmonitor, external diff and textconv. Network access is unrestricted. Plan restrictions apply independently in every permission mode.`,
+    description: `${template.description}\n\nAuto: Always runs inside the filesystem sandbox without approval; only the current working directory and system temporary directory are writable, and current repository Git metadata is read-only. Use this tool for read-only commands, network access, Python/uv, tests, and complex shell commands. For necessary writes across that boundary, use bash_escalated. Default: Only shared read-only whitelist commands run without approval; other commands require approval. YOLO runs without sandbox or approval. Plan restrictions apply independently.`,
     async execute(toolCallId, params: BashParams, signal, onUpdate, ctx) {
       const callMode = mode;
-      const command = params.command.trim();
-      const escalated = params.sandbox_permissions === "require_escalated";
-      const inspection = callMode === "default" && !escalated ? readOnlyBash(params.command) : undefined;
-      const needsApproval = callMode !== "yolo" && ((callMode === "default" && !inspection) || escalated);
-
-      if (needsApproval) {
-        const reasons = [
-          callMode === "default" ? "Default mode" : undefined,
-          escalated ? `filesystem escalation${params.escalation_reason ? `: ${params.escalation_reason}` : ""}` : undefined,
-        ].filter(Boolean).join("; ");
-        const allowed = await approve(
-          ctx,
-          `${MODE_LABELS[callMode]} bash permission request`,
-          `${command}\n\nReason: ${reasons}`,
-          signal,
-        );
-        if (!allowed) {
-          throw new Error(signal?.aborted
-            ? "Operation aborted"
-            : ctx.hasUI
-              ? "Permission denied by user"
-              : "Permission required, but no interactive UI is available");
-        }
+      const inspection = callMode === "default" ? readOnlyBash(params.command) : undefined;
+      if (callMode === "default" && !inspection) {
+        const allowed = await approve(ctx, "Default bash permission request", params.command, signal);
+        if (!allowed) throw new Error(signal?.aborted ? "Operation aborted" : ctx.hasUI
+          ? "Permission denied by user" : "Permission required, but no interactive UI is available");
       }
-
       signal?.throwIfAborted();
-      const useSandbox = callMode === "auto" && !escalated;
-      const tool = useSandbox
+      const tool = callMode === "auto"
         ? createBashTool(ctx.cwd, { operations: createSandboxOperations() })
         : createBashTool(ctx.cwd);
-      return tool.execute(
-        toolCallId,
-        { command: inspection ?? command, timeout: params.timeout },
-        signal,
-        onUpdate,
-      );
+      return tool.execute(toolCallId, { command: inspection ?? params.command, timeout: params.timeout }, signal, onUpdate);
+    },
+  });
+
+  pi.registerTool({
+    ...template,
+    name: "bash_escalated",
+    prepareArguments: undefined,
+    label: "bash (outside sandbox)",
+    executionMode: "sequential",
+    parameters: Type.Object({
+      command: Type.String({ minLength: 1, description: "Bash command requiring execution outside the filesystem sandbox" }),
+      timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
+      path: Type.String({ minLength: 1, pattern: "\\S", description: "Restricted filesystem path that must be written" }),
+      reason: Type.String({ minLength: 1, maxLength: 200, pattern: "\\S", description: "Necessary write operation and why it requires access to the restricted path" }),
+    }, { additionalProperties: false }),
+    description: "Request Bash execution outside the entire filesystem sandbox. Use only for necessary writes outside the writable roots or to protected Git metadata. Provide the restricted path and necessary operation. Read-only commands, network access, Python/uv, tests, and shell complexity alone do not justify using this tool; use bash instead. Default/Auto require user approval. YOLO executes without approval. Plan forbids this tool. Approval removes the entire sandbox, not just protection on the declared path.",
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      if (mode !== "yolo") {
+        const allowed = await approve(ctx, `${MODE_LABELS[mode]} bash escalation request`, `${params.command}\n\nRestricted path: ${params.path}\nReason: ${params.reason}\n\nApproval removes the entire filesystem sandbox for this call.`, signal);
+        if (!allowed) throw new Error(signal?.aborted ? "Operation aborted" : ctx.hasUI
+          ? "Permission denied by user" : "Permission required, but no interactive UI is available");
+      }
+      signal?.throwIfAborted();
+      return createBashTool(ctx.cwd).execute(toolCallId, { command: params.command, timeout: params.timeout }, signal, onUpdate);
     },
   });
 }

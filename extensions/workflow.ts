@@ -372,7 +372,7 @@ export function registerWorkflow(pi: ExtensionAPI, allowDocumentWrite: (ctx: Ext
     }
     if (planEnabled && event.toolName === "bash") {
       const inspection = readOnlyBash(event.input.command);
-      if (!inspection || ("sandbox_permissions" in event.input && event.input.sandbox_permissions === "require_escalated")) {
+      if (!inspection) {
         return { block: true, reason: "Plan 只允许白名单中的简单只读 Bash（pwd、基本 ls、受限 git status/log/diff）；未知参数、复杂 Shell 和提权请求均被拒绝" };
       }
       event.input.command = inspection;

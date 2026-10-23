@@ -99,11 +99,11 @@ Ask the agent to record progress and verification evidence step by step, and to 
 
 | Permission mode | Controlled file writes / document deletions | Bash |
 | --- | --- | --- |
-| **Default** | Confirm each operation | Allowlisted read-only commands without escalation run without approval; all others require confirmation. Execution is unsandboxed |
+| **Default** | Confirm each operation | Allowlisted read-only commands run without approval; all others require confirmation. Execution is unsandboxed |
 | **Auto** (default) | Ordinary targets inside the project and system temporary directory are allowed automatically; Git-protected paths, existing hard-linked files, and other paths require confirmation | Ordinary commands run automatically in the sandbox; the project and system temporary directory are writable, while other locations and current Git metadata are read-only |
 | **YOLO** | This package adds no permission prompts | This package adds no permission prompts or sandbox; Plan and `/init` restrictions still apply |
 
-For Auto Bash writes to Git metadata or paths outside the sandbox's writable roots, the model must explicitly provide `sandbox_permissions="require_escalated"` and a concise `escalation_reason`. **Approval removes the entire sandbox for that Bash call, not just a restriction on one path.** When approval is required, no interactive UI, denial, or cancellation means no execution.
+The `bash` tool accepts only `command` and optional `timeout`; in Auto it always runs inside the sandbox without approval. Necessary writes to protected Git metadata or outside writable roots use the separate `bash_escalated` tool, with `command`, optional `timeout`, required restricted `path`, and required `reason` describing the necessary write. Default/Auto confirm every escalation; YOLO executes without approval. Plan and `/init` forbid `bash_escalated`. Read-only commands, network access, Python/uv, tests, and shell complexity alone do not justify escalation. **Approval removes the entire sandbox for that call, not just protection on the declared path.** The declared path explains the request; it does not constrain command behavior. No interactive UI, denial, or cancellation means no execution when approval is required. The old escalation parameters on `bash` are no longer supported.
 
 Default and Plan share a conservative read-only Bash allowlist. Typical supported forms:
 
