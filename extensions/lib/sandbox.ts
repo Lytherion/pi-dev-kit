@@ -64,11 +64,15 @@ export function gitProtectedPaths(cwd: string): string[] {
   // Discover the repository on disk, not a repository selected by inherited GIT_* variables.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
   const result = spawnSync("git", ["-C", project, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], {
-    encoding: "utf8", timeout: 5000, env: { ...env, LC_ALL: "C", GIT_OPTIONAL_LOCKS: "0" },
+    encoding: "utf8", timeout: 5000, env: { ...env, LC_ALL: "C", GIT_OPTIONAL_LOCKS: "0", GIT_DISCOVERY_ACROSS_FILESYSTEM: "1" },
   });
   if (result.error) throw new Error(`无法发现 Git 保护路径；请安装 Git 2.31+：${result.error.message}`);
   if (result.status !== 0) {
-    if (!entry && result.status === 128 && result.stderr.startsWith("fatal: not a git repository")) return [];
+    if (result.status === 128 && result.stderr.startsWith("fatal: not a git repository")) {
+      if (!entry) return [];
+      // Keep a non-repository .git directory protected without blocking ordinary work.
+      if (fileInfo(entry)?.isDirectory()) return [entry];
+    }
     throw new Error(`无法发现 Git 保护路径：${result.stderr.trim()}`);
   }
   const paths = result.stdout.replace(/\r?\n$/, "").split(/\r?\n/);
